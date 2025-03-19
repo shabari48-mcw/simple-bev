@@ -1,4 +1,4 @@
-import os
+import os,traceback
 import time
 import argparse
 import numpy as np
@@ -11,11 +11,13 @@ import utils.vox
 import random
 import nuscenesdataset
 import torch
+import torch.onnx
 torch.multiprocessing.set_sharing_strategy('file_system')
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from tensorboardX import SummaryWriter
 import torch.nn.functional as F
+from rich import print
 
 random.seed(125)
 np.random.seed(125)
@@ -106,6 +108,33 @@ def balanced_occ_loss(pred, occ, free):
 
     return balanced_loss
 
+
+
+def convert_to_onnx(model, rgb_camXs, pix_T_cams,cam0_T_camXs, vox_util,rad_occ_mem0, device):
+
+    class OutputWrapper0(torch.nn.Module):
+        def __init__(self, model, vox_util):
+            super(OutputWrapper0, self).__init__()
+            self.model = model
+            self.vox_util = vox_util
+            
+        def forward(self, rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0):
+            outputs = self.model(rgb_camXs, pix_T_cams, cam0_T_camXs, self.vox_util, rad_occ_mem0)
+            return outputs[0]  # Return just the first output
+            
+    # Create similar wrappers for outputs 1-4
+    
+    # Export each wrapper separately
+    wrapper0 = OutputWrapper0(model, vox_util).eval()
+    torch.onnx.export(wrapper0, 
+                     (rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0),
+                     "output0.onnx", 
+                     opset_version=16,
+                     verbose=True)
+  
+    print("Model successfully converted to ONNX and saved as", onnx_filename)
+
+    
 def run_model(model, loss_fn, d, device='cuda:0', sw=None):
     metrics = {}
     total_loss = torch.tensor(0.0, requires_grad=True).to(device)
@@ -114,6 +143,7 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
 
     B0,T,S,C,H,W = imgs.shape
     assert(T==1)
+ 
 
     # eliminate the time dimension
     imgs = imgs[:,0]
@@ -134,7 +164,7 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
     offset_bev_g = offset_bev_g[:,0]
     radar_data = radar_data[:,0]
     egopose = egopose[:,0]
-    
+
     origin_T_velo0t = egopose.to(device) # B,T,4,4
 
     lrtlist_velo = lrtlist_velo.to(device)
@@ -208,77 +238,26 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
     cam0_T_camXs = cam0_T_camXs
 
     lrtlist_cam0_g = lrtlist_cam0
+    
+    print("Input Shapes")
+    
+    print("Shape of rgb_camXs:", rgb_camXs.shape)
+    print("Shape of pix_T_cams:", pix_T_cams.shape)
+    print("Shape of cam0_T_camXs:", cam0_T_camXs.shape)
+    print("Shape of vox_util:", vox_util)
+    print("Shape of rad_occ_mem0:", rad_occ_mem0.shape)
 
-    _, feat_bev_e, seg_bev_e, center_bev_e, offset_bev_e = model(
-            rgb_camXs=rgb_camXs,
-            pix_T_cams=pix_T_cams,
-            cam0_T_camXs=cam0_T_camXs,
-            vox_util=vox_util,
-            rad_occ_mem0=in_occ_mem0)
-
-    ce_loss = loss_fn(seg_bev_e, seg_bev_g, valid_bev_g)
-    center_loss = balanced_mse_loss(center_bev_e, center_bev_g)
-    offset_loss = torch.abs(offset_bev_e-offset_bev_g).sum(dim=1, keepdim=True)
-    offset_loss = utils.basic.reduce_masked_mean(offset_loss, seg_bev_g*valid_bev_g)
-
-    ce_factor = 1 / torch.exp(model.module.ce_weight)
-    ce_loss = 10.0 * ce_loss * ce_factor
-    ce_uncertainty_loss = 0.5 * model.module.ce_weight
-
-    center_factor = 1 / (2*torch.exp(model.module.center_weight))
-    center_loss = center_factor * center_loss
-    center_uncertainty_loss = 0.5 * model.module.center_weight
-
-    offset_factor = 1 / (2*torch.exp(model.module.offset_weight))
-    offset_loss = offset_factor * offset_loss
-    offset_uncertainty_loss = 0.5 * model.module.offset_weight
-
-    total_loss += ce_loss
-    total_loss += center_loss
-    total_loss += offset_loss
-    total_loss += ce_uncertainty_loss
-    total_loss += center_uncertainty_loss
-    total_loss += offset_uncertainty_loss
-
-    seg_bev_e_round = torch.sigmoid(seg_bev_e).round()
-    intersection = (seg_bev_e_round*seg_bev_g*valid_bev_g).sum()
-    union = ((seg_bev_e_round+seg_bev_g)*valid_bev_g).clamp(0,1).sum()
-
-    metrics['intersection'] = intersection.item()
-    metrics['union'] = union.item()
-    metrics['ce_loss'] = ce_loss.item()
-    metrics['center_loss'] = center_loss.item()
-    metrics['offset_loss'] = offset_loss.item()
-
-    if sw is not None and sw.save_this:
-        if model.module.use_radar or model.module.use_lidar:
-            sw.summ_occ('0_inputs/rad_occ_mem0', rad_occ_mem0)
-        sw.summ_occ('0_inputs/occ_mem0', occ_mem0)
-        sw.summ_rgb('0_inputs/rgb_camXs', torch.cat(rgb_camXs[0:1].unbind(1), dim=-1))
-
-        sw.summ_oned('2_outputs/seg_bev_g', seg_bev_g * (0.5+valid_bev_g*0.5), norm=False)
-        sw.summ_oned('2_outputs/valid_bev_g', valid_bev_g, norm=False)
-        sw.summ_oned('2_outputs/seg_bev_e', torch.sigmoid(seg_bev_e).round(), norm=False, frame_id=iou.item())
-        sw.summ_oned('2_outputs/seg_bev_e_soft', torch.sigmoid(seg_bev_e), norm=False)
-
-        sw.summ_oned('2_outputs/center_bev_g', center_bev_g, norm=False)
-        sw.summ_oned('2_outputs/center_bev_e', center_bev_e, norm=False)
-
-        sw.summ_flow('2_outputs/offset_bev_e', offset_bev_e, clip=10)
-        sw.summ_flow('2_outputs/offset_bev_g', offset_bev_g, clip=10)
-
-    return total_loss, metrics
+    convert_to_onnx(model, rgb_camXs,pix_T_cams, cam0_T_camXs,vox_util,rad_occ_mem0, device)
     
 def main(
         exp_name='eval',
         # val/test
         log_freq=100,
         shuffle=False,
-        dset='mini', # we will just use val
+        dset='mini', 
         batch_size=8,
         nworkers=12,
-        # data/log/load directories
-        # data_dir='../nuscenes/',
+       
         data_dir="/media/ava/Data_CI/Datasets/nuscenes-mini",
         log_dir='logs_eval_nuscenes_bevseg',
         init_dir='checkpoints/rgb_model',
@@ -311,8 +290,7 @@ def main(
     model_name = model_name + '_' + model_date
     print('model_name', model_name)
 
-    # set up logging
-    writer_ev = SummaryWriter(os.path.join(log_dir, model_name + '/ev'), max_queue=10, flush_secs=60)
+  
 
     # set up dataloader
     final_dim = (int(224 * res_scale), int(400 * res_scale))
@@ -380,20 +358,11 @@ def main(
 
     intersection = 0
     union = 0
-    while global_step < max_iters:
+    while global_step < 1:
         global_step += 1
 
         iter_start_time = time.time()
         read_start_time = time.time()
-
-        sw_ev = utils.improc.Summ_writer(
-            writer=writer_ev,
-            global_step=global_step,
-            log_freq=log_freq,
-            fps=2,
-            scalar_freq=int(log_freq/2),
-            just_gif=True)
-        sw_ev.save_this = False
         
         try:
             sample = next(val_iterloader)
@@ -402,42 +371,11 @@ def main(
 
         read_time = time.time()-read_start_time
             
-        with torch.no_grad():
-            total_loss, metrics = run_model(model, seg_loss_fn, sample, device, sw_ev)
-
-        intersection += metrics['intersection']
-        union += metrics['union']
-
-        sw_ev.summ_scalar('pooled/iou_ev', intersection/union)
+        run_model(model, seg_loss_fn, sample, device)
         
-        loss_pool_ev.update([total_loss.item()])
-        sw_ev.summ_scalar('pooled/total_loss', loss_pool_ev.mean())
-        sw_ev.summ_scalar('stats/total_loss', total_loss.item())
+        # _, feat_bev_e, seg_bev_e, center_bev_e, offset_bev_e = run_model(model, seg_loss_fn, sample, device)
+        # # print(_, feat_bev_e, seg_bev_e, center_bev_e, offset_bev_e)
 
-        ce_pool_ev.update([metrics['ce_loss']])
-        sw_ev.summ_scalar('pooled/ce_loss', ce_pool_ev.mean())
-        sw_ev.summ_scalar('stats/ce_loss', metrics['ce_loss'])
-        
-        center_pool_ev.update([metrics['center_loss']])
-        sw_ev.summ_scalar('pooled/center_loss', center_pool_ev.mean())
-        sw_ev.summ_scalar('stats/center_loss', metrics['center_loss'])
-
-        offset_pool_ev.update([metrics['offset_loss']])
-        sw_ev.summ_scalar('pooled/offset_loss', offset_pool_ev.mean())
-        sw_ev.summ_scalar('stats/offset_loss', metrics['offset_loss'])
-
-        iter_time = time.time()-iter_start_time
-        
-        time_pool_ev.update([iter_time])
-        sw_ev.summ_scalar('pooled/time_per_batch', time_pool_ev.mean())
-        sw_ev.summ_scalar('pooled/time_per_el', time_pool_ev.mean()/float(B))
-
-        print('%s; step %06d/%d; rtime %.2f; itime %.2f (%.2f ms); loss %.5f; iou_ev %.1f' % (
-            model_name, global_step, max_iters, read_time, iter_time, 1000*time_pool_ev.mean(),
-            total_loss.item(), 100*intersection/union))
-    print('final %s mean iou' % dset, 100*intersection/union)
-    
-    writer_ev.close()
             
 
 if __name__ == '__main__':

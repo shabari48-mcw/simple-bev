@@ -1241,7 +1241,8 @@ def worker_rnd_init(x):
 def compile_data(version, dataroot, data_aug_conf, centroid, bounds, res_3d, bsz,
                  nworkers, shuffle=True, nsweeps=1, nworkers_val=1, seqlen=1, refcam_id=1, get_tids=False,
                  temporal_aug=False, use_radar_filters=False, do_shuffle_cams=True):
-
+    
+    dataroot="/media/ava/Data_CI/Datasets/nuscenes-mini"
     if 'lyft' in version:
         print('loading lyft...')
         dataroot = os.path.join(dataroot, 'trainval')
@@ -1250,8 +1251,10 @@ def compile_data(version, dataroot, data_aug_conf, centroid, bounds, res_3d, bsz
                            verbose=True)
     else:
         print('loading nuscenes...')
+        print(dataroot,version)
         nusc = NuScenes(version='v1.0-{}'.format(version),
-                        dataroot=os.path.join(dataroot, version),
+                        # dataroot=os.path.join(dataroot, version),
+                        dataroot=dataroot,
                         verbose=False)
     print('making parser...')
     traindata = VizData(

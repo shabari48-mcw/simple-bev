@@ -1,2 +1,8 @@
 *~
 __pycache__
+checkpoints
+*.log
+*.pyc
+logs_eval_nuscenes
+logs_eval_nuscenes_bevseg
+*.onnx

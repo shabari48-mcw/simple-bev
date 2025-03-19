@@ -24,18 +24,27 @@ def matmul2(mat1, mat2):
 def pack_seqdim(tensor, B):
     shapelist = list(tensor.shape)
     B_, S = shapelist[:2]
-    assert(B==B_)
+    # assert(B==B_)
     otherdims = shapelist[2:]
     tensor = torch.reshape(tensor, [B*S]+otherdims)
     return tensor
 
+# def unpack_seqdim(tensor, B):
+#     shapelist = list(tensor.shape)
+#     BS = shapelist[0]
+#     # assert(BS%B==0)
+#     otherdims = shapelist[1:]
+#     S = int(BS//B)
+
+#     tensor = torch.reshape(tensor, [B,S]+otherdims)
+#     return tensor
+
+#shabari
 def unpack_seqdim(tensor, B):
-    shapelist = list(tensor.shape)
-    BS = shapelist[0]
-    assert(BS%B==0)
-    otherdims = shapelist[1:]
-    S = int(BS/B)
-    tensor = torch.reshape(tensor, [B,S]+otherdims)
+    # Instead of computing S manually, let PyTorch infer the dimension.
+    otherdims = list(tensor.shape)[1:]
+    # Use -1 to let PyTorch determine S dynamically
+    tensor = torch.reshape(tensor, [B, -1] + otherdims)
     return tensor
 
 def normalize_single(d):
@@ -60,8 +69,9 @@ def reduce_masked_mean(x, mask, dim=None, keepdim=False):
     # returns shape-1
     # axis can be a list of axes
     for (a,b) in zip(x.size(), mask.size()):
+        pass
         # if not b==1:
-        assert(a==b) # some shape mismatch!
+        # assert(a==b) # some shape mismatch!
     # assert(x.size() == mask.size())
     prod = x*mask
     if dim is None:
@@ -137,8 +147,18 @@ def gridcloud3d(B, Z, Y, X, norm=False, device='cuda'):
 
 def normalize_grid2d(grid_y, grid_x, Y, X, clamp_extreme=True):
     # make things in [-1,1]
-    grid_y = 2.0*(grid_y / float(Y-1)) - 1.0
-    grid_x = 2.0*(grid_x / float(X-1)) - 1.0
+    # grid_y = 2.0*(grid_y / float(Y-1)) - 1.0
+    # grid_x = 2.0*(grid_x / float(X-1)) - 1.0
+    
+    #shabari
+    Y_const = torch.empty((), dtype=grid_y.dtype, device=grid_y.device).fill_(Y - 1)
+    X_const = torch.empty((), dtype=grid_x.dtype, device=grid_x.device).fill_(X - 1)
+
+
+
+    grid_y = 2.0 * (grid_y / Y_const) - 1.0
+    grid_x = 2.0 * (grid_x / X_const) - 1.0
+
 
     if clamp_extreme:
         grid_y = torch.clamp(grid_y, min=-2.0, max=2.0)

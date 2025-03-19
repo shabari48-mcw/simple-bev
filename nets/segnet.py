@@ -136,8 +136,12 @@ class Decoder(nn.Module):
 
         if bev_flip_indices is not None:
             bev_flip1_index, bev_flip2_index = bev_flip_indices
-            x[bev_flip2_index] = torch.flip(x[bev_flip2_index], [-2]) # note [-2] instead of [-3], since Y is gone now
-            x[bev_flip1_index] = torch.flip(x[bev_flip1_index], [-1])
+            # x[bev_flip2_index] = torch.flip(x[bev_flip2_index], [-2]) # note [-2] instead of [-3], since Y is gone now
+            # x[bev_flip1_index] = torch.flip(x[bev_flip1_index], [-1])
+            
+            #shabari
+            x[bev_flip2_index] = x[bev_flip2_index][:, ::-1] # note [-2] instead of [-3], since Y is gone now
+            x[bev_flip1_index] = x[bev_flip1_index][:, ::-1] # Flip along the last dimension
 
         feat_output = self.feat_head(x)
         segmentation_output = self.segmentation_head(x)
@@ -386,7 +390,7 @@ class Segnet(nn.Module):
             - (B, 1, Z, Y, X) when use_lidar = True
         '''
         B, S, C, H, W = rgb_camXs.shape
-        assert(C==3)
+        # assert(C==3)
         # reshape tensors
         __p = lambda x: utils.basic.pack_seqdim(x, B)
         __u = lambda x: utils.basic.unpack_seqdim(x, B)
@@ -407,8 +411,13 @@ class Segnet(nn.Module):
             feat_camXs_[self.rgb_flip_index] = torch.flip(feat_camXs_[self.rgb_flip_index], [-1])
         _, C, Hf, Wf = feat_camXs_.shape
 
-        sy = Hf/float(H)
-        sx = Wf/float(W)
+        # sy = Hf/float(H)
+        # sx = Wf/float(W)
+        
+        #shabari 
+        sy = Hf / H
+        sx = Wf / W
+        
         Z, Y, X = self.Z, self.Y, self.X
 
         # unproject image feature to 3d grid

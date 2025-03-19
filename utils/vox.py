@@ -316,8 +316,17 @@ class Vox_util(object):
         x, y = xy_pixB[:,:,0], xy_pixB[:,:,1]
         # these are B x N
 
-        x_valid = (x>-0.5).bool() & (x<float(W-0.5)).bool()
-        y_valid = (y>-0.5).bool() & (y<float(H-0.5)).bool()
+        # x_valid = (x>-0.5).bool() & (x<float(W-0.5)).bool()
+        # y_valid = (y>-0.5).bool() & (y<float(H-0.5)).bool()
+        
+        #shabari 
+        W_const = torch.empty((), dtype=x.dtype, device=x.device).fill_(W - 0.5)
+        H_const = torch.empty((), dtype=y.dtype, device=y.device).fill_(H - 0.5)
+
+
+        x_valid = (x > -0.5) & (x < W_const)
+        y_valid = (y > -0.5) & (y < H_const)
+
         z_valid = (z>0.0).bool()
         valid_mem = (x_valid & y_valid & z_valid).reshape(B, 1, Z, Y, X).float()
 
