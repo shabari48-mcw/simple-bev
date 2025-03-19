@@ -11,7 +11,6 @@ import utils.vox
 import random
 import nuscenesdataset
 import torch
-import torch.onnx
 torch.multiprocessing.set_sharing_strategy('file_system')
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -111,27 +110,79 @@ def balanced_occ_loss(pred, occ, free):
 
 
 def convert_to_onnx(model, rgb_camXs, pix_T_cams,cam0_T_camXs, vox_util,rad_occ_mem0, device):
+    import torch
+    import torch.onnx
 
-    class OutputWrapper0(torch.nn.Module):
+    # Define a wrapper module that fixes vox_util
+    class ONNXWrapper(torch.nn.Module):
         def __init__(self, model, vox_util):
-            super(OutputWrapper0, self).__init__()
+            super(ONNXWrapper, self).__init__()
             self.model = model
-            self.vox_util = vox_util
-            
+            self.vox_util = vox_util  # store the vox_util object as an attribute
+
         def forward(self, rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0):
-            outputs = self.model(rgb_camXs, pix_T_cams, cam0_T_camXs, self.vox_util, rad_occ_mem0)
-            return outputs[0]  # Return just the first output
-            
-    # Create similar wrappers for outputs 1-4
+           
+            outputs = self.model(
+                rgb_camXs=rgb_camXs,
+                pix_T_cams=pix_T_cams,
+                cam0_T_camXs=cam0_T_camXs,
+                vox_util=self.vox_util,    # use the stored object
+                rad_occ_mem0=rad_occ_mem0
+            )
+            return outputs
+
+
+    # dummy_rgb_camXs = torch.randn(1, 6, 3, 224, 400).to(device)
+    # dummy_pix_T_cams = torch.randn(1, 6, 4, 4).to(device)
+    # dummy_cam0_T_camXs = torch.randn(1, 6, 4, 4).to(device)
+    # dummy_rad_occ_mem0 = torch.randn(1, 1, 200, 8, 200).to(device)
     
-    # Export each wrapper separately
-    wrapper0 = OutputWrapper0(model, vox_util).eval()
-    torch.onnx.export(wrapper0, 
-                     (rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0),
-                     "output0.onnx", 
-                     opset_version=16,
-                     verbose=True)
-  
+    # inputs=(dummy_rgb_camXs, dummy_pix_T_cams, dummy_cam0_T_camXs, dummy_rad_occ_mem0)
+
+    wrapper = ONNXWrapper(model, vox_util)
+    wrapper.eval()
+
+    # Export the model to ONNX
+    onnx_filename = "simple_bev_model.onnx"
+    
+    try:
+        traced_model = torch.jit.trace(
+        wrapper, 
+        (rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0)
+    )
+        print(traced_model.graph)
+        
+        # print("\nRunning inference with traced model...")
+        # output = traced_model(dummy_rgb_camXs, dummy_pix_T_cams, dummy_cam0_T_camXs, dummy_rad_occ_mem0)
+
+        # # Print the output tensor
+        # print("\nModel Output:")
+        # print(output)
+        # print("\nOutput Shape:", len(output))
+        # print("\nOutput Data Type:", output.dtype)
+
+    except Exception as e:
+        print("Error in tracing model:", e)
+        traceback.print_exc()  
+        exit()
+    
+    torch.onnx.export(
+        wrapper,
+        (rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0),
+        onnx_filename,
+        opset_version=16,              
+        input_names=['rgb_camXs', 'pix_T_cams', 'cam0_T_camXs', 'rad_occ_mem0'],
+        output_names=['output_0', 'feat_bev_e', 'seg_bev_e', 'center_bev_e', 'offset_bev_e'],  
+        # dynamic_axes={
+        #     'rgb_camXs': {0: 'batch_size'},
+        #     'pix_T_cams': {0: 'batch_size'},
+        #     'cam0_T_camXs': {0: 'batch_size'},
+        #     'rad_occ_mem0': {0: 'batch_size'},
+        #     'seg_bev_e': {0: 'batch_size'}
+        # },
+        verbose=True
+    )
+
     print("Model successfully converted to ONNX and saved as", onnx_filename)
 
     
