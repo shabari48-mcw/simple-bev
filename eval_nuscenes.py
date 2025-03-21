@@ -209,12 +209,15 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
 
     lrtlist_cam0_g = lrtlist_cam0
 
+    
+    
     _, feat_bev_e, seg_bev_e, center_bev_e, offset_bev_e = model(
             rgb_camXs=rgb_camXs,
             pix_T_cams=pix_T_cams,
             cam0_T_camXs=cam0_T_camXs,
             vox_util=vox_util,
             rad_occ_mem0=in_occ_mem0)
+    
 
     ce_loss = loss_fn(seg_bev_e, seg_bev_g, valid_bev_g)
     center_loss = balanced_mse_loss(center_bev_e, center_bev_g)
@@ -278,7 +281,7 @@ def main(
         batch_size=8,
         nworkers=12,
         # data/log/load directories
-        # data_dir='../nuscenes/',
+        # data_dir="/media/ava/Data_CI/Datasets/nuscenes-full/nuscenes/",
         data_dir="/media/ava/Data_CI/Datasets/nuscenes-mini",
         log_dir='logs_eval_nuscenes_bevseg',
         init_dir='checkpoints/rgb_model',
@@ -324,7 +327,6 @@ def main(
                  'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'],
         'ncams': ncams,
     }
-    data_dir="/media/ava/Data_CI/Datasets/nuscenes-mini"
     _, val_dataloader = nuscenesdataset.compile_data(
         dset,
         data_dir,
@@ -351,6 +353,8 @@ def main(
         assert_cube=False)
     
     max_iters = len(val_dataloader) # determine iters by length of dataset
+    
+    print(f"Length of val_dataloader: {max_iters}")
 
     # set up model & seg loss
     seg_loss_fn = SimpleLoss(2.13).to(device)
@@ -380,7 +384,7 @@ def main(
 
     intersection = 0
     union = 0
-    while global_step < max_iters:
+    while global_step < 2 : #max_iters:
         global_step += 1
 
         iter_start_time = time.time()

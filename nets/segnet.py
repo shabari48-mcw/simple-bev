@@ -11,7 +11,6 @@ import utils.misc
 import utils.basic
 
 from torchvision.models.resnet import resnet18
-from efficientnet_pytorch import EfficientNet
 
 EPS = 1e-4
 
@@ -136,12 +135,12 @@ class Decoder(nn.Module):
 
         if bev_flip_indices is not None:
             bev_flip1_index, bev_flip2_index = bev_flip_indices
-            # x[bev_flip2_index] = torch.flip(x[bev_flip2_index], [-2]) # note [-2] instead of [-3], since Y is gone now
-            # x[bev_flip1_index] = torch.flip(x[bev_flip1_index], [-1])
+            x[bev_flip2_index] = torch.flip(x[bev_flip2_index], [-2]) # note [-2] instead of [-3], since Y is gone now
+            x[bev_flip1_index] = torch.flip(x[bev_flip1_index], [-1])
             
-            #shabari
-            x[bev_flip2_index] = x[bev_flip2_index][:, ::-1] # note [-2] instead of [-3], since Y is gone now
-            x[bev_flip1_index] = x[bev_flip1_index][:, ::-1] # Flip along the last dimension
+            # #shabari
+            # x[bev_flip2_index] = x[bev_flip2_index][:, ::-1] # note [-2] instead of [-3], since Y is gone now
+            # x[bev_flip1_index] = x[bev_flip1_index][:, ::-1] # Flip along the last dimension
 
         feat_output = self.feat_head(x)
         segmentation_output = self.segmentation_head(x)
@@ -164,7 +163,8 @@ class Encoder_res101(nn.Module):
     def __init__(self, C):
         super().__init__()
         self.C = C
-        resnet = torchvision.models.resnet101(pretrained=True)
+        # resnet = torchvision.models.resnet101(pretrained=True)
+        resnet= torchvision.models.resnet101(weights=torchvision.models.ResNet101_Weights.DEFAULT)
         self.backbone = nn.Sequential(*list(resnet.children())[:-4])
         self.layer3 = resnet.layer3
 
@@ -183,7 +183,7 @@ class Encoder_res50(nn.Module):
     def __init__(self, C):
         super().__init__()
         self.C = C
-        resnet = torchvision.models.resnet50(pretrained=True)
+        resnet = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.DEFAULT)
         self.backbone = nn.Sequential(*list(resnet.children())[:-4])
         self.layer3 = resnet.layer3
 
@@ -197,8 +197,8 @@ class Encoder_res50(nn.Module):
         x = self.depth_layer(x)
 
         return x
-
-class Encoder_eff(nn.Module):
+"""
+ class Encoder_eff(nn.Module):
     def __init__(self, C, version='b4'):
         super().__init__()
         self.C = C
@@ -289,6 +289,8 @@ class Encoder_eff(nn.Module):
         x = self.depth_layer(x)  # feature and depth head
         return x
 
+
+"""
 class Segnet(nn.Module):
     def __init__(self, Z, Y, X, vox_util=None, 
                  use_radar=False,
@@ -319,11 +321,11 @@ class Segnet(nn.Module):
             self.encoder = Encoder_res101(feat2d_dim)
         elif encoder_type == "res50":
             self.encoder = Encoder_res50(feat2d_dim)
-        elif encoder_type == "effb0":
-            self.encoder = Encoder_eff(feat2d_dim, version='b0')
-        else:
-            # effb4
-            self.encoder = Encoder_eff(feat2d_dim, version='b4')
+        # elif encoder_type == "effb0":
+        #     self.encoder = Encoder_eff(feat2d_dim, version='b0')
+        # else:
+        #     # effb4
+        #     self.encoder = Encoder_eff(feat2d_dim, version='b4')
 
         # BEV compressor
         if self.use_radar:

@@ -155,7 +155,6 @@ def normalize_grid2d(grid_y, grid_x, Y, X, clamp_extreme=True):
     X_const = torch.empty((), dtype=grid_x.dtype, device=grid_x.device).fill_(X - 1)
 
 
-
     grid_y = 2.0 * (grid_y / Y_const) - 1.0
     grid_x = 2.0 * (grid_x / X_const) - 1.0
 
