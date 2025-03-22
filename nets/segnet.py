@@ -60,18 +60,15 @@ class UpsamplingConcat(nn.Module):
         super().__init__()
 
         self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bilinear', align_corners=False)
-        self.ISTORCH = True
 
          # Issue arrising here
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.InstanceNorm2d(out_channels),
-            #The outputs are same if instancenorm2d track_running_stats is set to False else different 
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.InstanceNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            # PrintLayer(),
+            nn.ReLU(inplace=True), 
         )
        
         
@@ -332,12 +329,15 @@ class Segnet(nn.Module):
         device = rgb_camXs_.device
         rgb_camXs_ = (rgb_camXs_ + 0.5 - self.mean.to(device)) / self.std.to(device)
         #The outputs are same
+            
         if self.rand_flip:
             B0, _, _, _ = rgb_camXs_.shape
             self.rgb_flip_index = np.random.choice([0,1], B0).astype(bool)
             rgb_camXs_[self.rgb_flip_index] = torch.flip(rgb_camXs_[self.rgb_flip_index], [-1])
         feat_camXs_ = self.encoder(rgb_camXs_)
         # outputs are different when instance norm track_running_stats is set to True else same
+        # return feat_camXs_
+    
         if self.rand_flip:
             feat_camXs_[self.rgb_flip_index] = torch.flip(feat_camXs_[self.rgb_flip_index], [-1])
         _, C, Hf, Wf = feat_camXs_.shape
@@ -413,21 +413,6 @@ class Segnet(nn.Module):
         seg_e = out_dict['segmentation']
         center_e = out_dict['instance_center']
         offset_e = out_dict['instance_offset']
-        
-        if PrintLayer.ISTORCH:
-            print('Saving Torch Tensor')
-            torch.save(raw_e, 'r1.pt')
-            torch.save(feat_e, 'f1.pt')
-            torch.save(seg_e, 's1.pt')
-            torch.save(center_e, 'c1.pt')
-            torch.save(offset_e, 'o1.pt')
-        else:
-            print('Saving ONNX Tensor')
-            torch.save(raw_e, 'r2.pt')
-            torch.save(feat_e, 'f2.pt')
-            torch.save(seg_e, 's2.pt')
-            torch.save(center_e, 'c2.pt')
-            torch.save(offset_e, 'o2.pt')
             
         return raw_e, feat_e, seg_e, center_e, offset_e
 

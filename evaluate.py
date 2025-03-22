@@ -21,8 +21,6 @@ import torch.onnx
 import onnxruntime as ort
 import onnx 
 
-onnx_model = onnx.load("debugcopy.onnx")
-ort_session = ort.InferenceSession(onnx_model.SerializeToString())
 
 random.seed(125)
 np.random.seed(125)
@@ -49,6 +47,7 @@ vox_util = utils.vox.Vox_util(
     bounds=bounds,
     assert_cube=False)
 
+TL = 0
 
 def requires_grad(parameters, flag=True):
     for p in parameters:
@@ -121,8 +120,7 @@ def balanced_occ_loss(pred, occ, free):
     return balanced_loss
 
     
-def run_model(model, loss_fn, d, device='cuda:0', sw=None):
-
+def run_model(model, loss_fn, d, device='cuda:0', sw=None,TL=None):
 
     imgs, rots, trans, intrins, pts0, extra0, pts, extra, lrtlist_velo, vislist, tidlist, scorelist, seg_bev_g, valid_bev_g, center_bev_g, offset_bev_g, radar_data, egopose = d
 
@@ -217,13 +215,8 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
     cam0_T_camXs = cam0_T_camXs
 
     lrtlist_cam0_g = lrtlist_cam0
-    
-    from nets.segnet import PrintLayer
-    
-    PrintLayer.ISTORCH=True
-    
-    
-    output0, feat_bev_e, seg_bev_e, center_bev_e, offset_bev_e = model(
+
+     = model(
             rgb_camXs=rgb_camXs,
             pix_T_cams=pix_T_cams,
             cam0_T_camXs=cam0_T_camXs,
@@ -233,26 +226,38 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
    # ONNx Inference
     
     input_tensors = [rgb_camXs.cpu().numpy(), pix_T_cams.cpu().numpy(), cam0_T_camXs.cpu().numpy()]
+    
+    ort_session = ort.InferenceSession("simple_bev_model_encoder.onnx")
+    
     inputs =dict(zip([x.name for x in ort_session.get_inputs()], input_tensors))
+    
+    print([x.name for x in ort_session.get_inputs()])
+    
+    print([x.shape for x in input_tensors])
 
     output_tensors = ort_session.run(None,inputs)
     
     # Calculate MSE between original and ONNX model outputs
-    output0_onnx = torch.tensor(output_tensors[0]).to(device)
-    feat_bev_e_onnx = torch.tensor(output_tensors[1]).to(device)
-    seg_bev_e_onnx = torch.tensor(output_tensors[2]).to(device)
-    center_bev_e_onnx = torch.tensor(output_tensors[3]).to(device)
-    offset_bev_e_onnx = torch.tensor(output_tensors[4]).to(device)
+    # output0_onnx = torch.tensor(output_tensors[0]).to(device)
+    # feat_bev_e_onnx = torch.tensor(output_tensors[1]).to(device)
+    # seg_bev_e_onnx = torch.tensor(output_tensors[2]).to(device)
+    # center_bev_e_onnx = torch.tensor(output_tensors[3]).to(device)
+    # offset_bev_e_onnx = torch.tensor(output_tensors[4]).to(device)
 
-    mse0 = F.mse_loss(output0_onnx, output0)
+    mse_loss = nn.MSELoss()
+
+    # Calculate the MSE
+    loss = mse_loss(torch.from_numpy(output_tensors[0]).cpu(), output0.cpu())
+    # total_mse = loss.item()
+    print(f"MSE Loss (using nn.MSELoss): {loss.item()}")
+    
+    TL.append(loss.item())
+
     mse_feat = F.mse_loss(feat_bev_e, feat_bev_e_onnx)
     mse_seg = F.mse_loss(seg_bev_e, seg_bev_e_onnx)
     mse_center = F.mse_loss(center_bev_e, center_bev_e_onnx)
     mse_offset = F.mse_loss(offset_bev_e, offset_bev_e_onnx)
- 
-
-
-    print(f"MSE(0) {mse0.item()} MSE (feat) {mse_feat.item()} MSE (seg): {mse_seg.item()}, MSE (center): {mse_center.item()}, MSE (offset): {mse_offset.item()}")
+    
 
     
 def main(
@@ -280,9 +285,11 @@ def main(
         use_metaradar=False,
         do_rgbcompress=True,
         # cuda
-        device_ids=[4,5,6,7],
+        device_ids=[0],
 ):
     B = batch_size
+    print("batchsize")
+    print(B)
     assert(B % len(device_ids) == 0) # batch size must be divisible by number of gpus
 
     device = 'cuda:%d' % device_ids[0]
@@ -330,7 +337,7 @@ def main(
 
 
     
-    max_iters = 1 
+    max_iters = len(val_dataloader)
 
     # set up model & seg loss
     seg_loss_fn = SimpleLoss(2.13).to(device)
@@ -349,6 +356,7 @@ def main(
     requires_grad(parameters, False)
     model.eval()
 
+    TL=[]
   
     while global_step < max_iters:
         global_step += 1
@@ -358,8 +366,9 @@ def main(
         except StopIteration:
             break
             
-        run_model(model, seg_loss_fn, sample, device)
-            
+        run_model(model, seg_loss_fn, sample, device,TL=TL)
+          
+    print(sum(TL)/max_iters)
 
 if __name__ == '__main__':
     Fire(main)

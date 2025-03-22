@@ -118,54 +118,29 @@ def balanced_occ_loss(pred, occ, free):
 
 def convert_to_onnx(model, rgb_camXs, pix_T_cams,cam0_T_camXs, vox_util,rad_occ_mem0, device):
 
-    class ONNXWrapper(torch.nn.Module):
-        def __init__(self, model, vox_util):
-            super(ONNXWrapper, self).__init__()
-            self.model = model
-            self.vox_util = vox_util
-
-        def forward(self, rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0):
-           
-            outputs = self.model(
-                rgb_camXs=rgb_camXs,
-                pix_T_cams=pix_T_cams,
-                cam0_T_camXs=cam0_T_camXs,
-                rad_occ_mem0=rad_occ_mem0,  
-                vox_util=self.vox_util   
-            )
-            return outputs
 
     inputs=(rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0)
 
     model.eval()
     model.module.eval()
-    wrapper = ONNXWrapper(model.module, vox_util) 
-    wrapper.eval() 
-    onnx_filename = "debug.onnx"
-    
-  
-    wrapper.eval()
-    # for module in wrapper.modules():
-    #      if isinstance(module, nn.InstanceNorm2d) :
-            # print(module.running_mean)   None
-            # print(module.running_var) None
-            
-            # module.track_running_stats = True  when false the mse is same after this layer
-            # module.running_mean = torch.zeros(module.num_features).to(device)
-            # module.running_var = torch.ones(module.num_features).to(device)
 
+    dummy_input=(rgb_camXs,
+            pix_T_cams,
+            cam0_T_camXs,
+            # vox_util,
+            # in_occ_mem0
+            )
+    onnx_filename= "simple_bev_model_encoder.onnx"
 
     print("Converting model to ONNX...")
     with torch.no_grad():
         torch.onnx.export(
-            wrapper.eval(),
-            inputs,
-            onnx_filename,
-            opset_version=20,              
-            input_names=['rgb_camXs', 'pix_T_cams', 'cam0_T_camXs', 'rad_occ_mem0'],
-            output_names=['output_0', 'feat_bev_e', 'seg_bev_e', 'center_bev_e', 'offset_bev_e'],  
-            verbose=False,
-            do_constant_folding=True
+                model.module,  # Your model
+                dummy_input,  # Sample input
+                onnx_filename,  # Output file name
+                opset_version=16,  # Set an appropriate ONNX opset version
+                input_names=["rgb_camXs","pix_T_cams","cam0_T_camXs"],#,"vox_util","in_occ_mem0ss"],  # Name the input tensor
+                output_names=['output_0', 'feat_bev_e', 'seg_bev_e', 'center_bev_e', 'offset_bev_e'],  
         )
 
         print("Model successfully converted to ONNX and saved as", onnx_filename)
@@ -268,21 +243,14 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
     cam0_T_camXs = cam0_T_camXs
 
     lrtlist_cam0_g = lrtlist_cam0
+   
     
-    from nets.segnet import PrintLayer
-    
-    PrintLayer.ISTORCH=True
-    
-    
-    _, feat_bev_e, seg_bev_e, center_bev_e, offset_bev_e = model(
+    output = model(
             rgb_camXs=rgb_camXs,
             pix_T_cams=pix_T_cams,
             cam0_T_camXs=cam0_T_camXs,
             vox_util=vox_util,
             rad_occ_mem0=in_occ_mem0)
-    
-    PrintLayer.ISTORCH=False
-    
     
     convert_to_onnx(model, rgb_camXs,pix_T_cams, cam0_T_camXs,vox_util,rad_occ_mem0, device)
     

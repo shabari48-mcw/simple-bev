@@ -3,7 +3,7 @@
 DATA_DIR="/media/ava/Data_CI/Datasets/nuscenes-mini/"
 # DATA_DIR="/media/ava/Data_CI/Datasets/nuscenes-full/nuscenes/"
 
-MODEL_NAME="1x5_3e-4_rgb00_20:04:28"
+MODEL_NAME="8x5_5e-4_rgb12_22:43:46"
 
 EXP_NAME="00" # evaluate rgb00 model
 
