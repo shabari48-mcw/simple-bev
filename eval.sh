@@ -19,7 +19,18 @@ EXP_NAME="00" # evaluate rgb00 model
 #        --res_scale=1 \
 #        --device_ids=[0]
 
-python eval_onnx.py \
+# python eval_onnx.py \
+#        --batch_size=1 \
+#        --exp_name=${EXP_NAME} \
+#        --dset='mini' \
+#        --data_dir=$DATA_DIR \
+#        --log_dir='logs_eval_nuscenes' \
+#        --init_dir="checkpoints/${MODEL_NAME}" \
+#        --res_scale=1 \
+#        --device_ids=[0]
+
+
+python evaluate.py \
        --batch_size=1 \
        --exp_name=${EXP_NAME} \
        --dset='mini' \

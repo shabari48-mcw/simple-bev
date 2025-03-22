@@ -25,7 +25,7 @@ from rich.console import Console
 
 
 #ONNX
-onnx_model = onnx.load("simplified.onnx")
+onnx_model = onnx.load("debug.onnx")
 ort_session = ort.InferenceSession(onnx_model.SerializeToString())
 total_metrics ={"mse0" :0, "mse_feat":0, "mse_seg":0, "mse_center":0, "mse_offset":0}
 
@@ -49,6 +49,12 @@ YMIN, YMAX = -5, 5
 bounds = (XMIN, XMAX, YMIN, YMAX, ZMIN, ZMAX)
 
 Z, Y, X = 200, 8, 200
+
+vox_util = utils.vox.Vox_util(
+        Z, Y, X,
+        scene_centroid=scene_centroid.to("cuda:0"),
+        bounds=bounds,
+        assert_cube=False)
 
 def requires_grad(parameters, flag=True):
     for p in parameters:
@@ -194,11 +200,6 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
 
     lrtlist_cam0 = utils.geom.apply_4x4_to_lrtlist(cams_T_velo[:,0], lrtlist_velo)
 
-    vox_util = utils.vox.Vox_util(
-        Z, Y, X,
-        scene_centroid=scene_centroid.to(device),
-        bounds=bounds,
-        assert_cube=False)
     
     V = xyz_velo0.shape[1]
 
@@ -231,14 +232,12 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
             vox_util=vox_util,
             rad_occ_mem0=in_occ_mem0)
     
-    
    # ONNx Inference
     
     input_tensors = [rgb_camXs.cpu().numpy(), pix_T_cams.cpu().numpy(), cam0_T_camXs.cpu().numpy()]
     inputs =dict(zip([x.name for x in ort_session.get_inputs()], input_tensors))
 
     output_tensors = ort_session.run(None,inputs)
-    
     
     # Calculate MSE between original and ONNX model outputs
     output0_onnx = torch.tensor(output_tensors[0]).to(device)
@@ -391,13 +390,7 @@ def main(
     )
     val_iterloader = iter(val_dataloader)
 
-    vox_util = utils.vox.Vox_util(
-        Z, Y, X,
-        scene_centroid=scene_centroid.to(device),
-        bounds=bounds,
-        assert_cube=False)
-    
-    max_iters =  10 #len(val_dataloader) # determine iters by length of dataset
+    max_iters =  2 #len(val_dataloader) 
 
     print(f"batch_size {B}")
     # set up model & seg loss

@@ -12,6 +12,21 @@ import utils.basic
 
 from torchvision.models.resnet import resnet18
 
+scene_centroid_x = 0.0
+scene_centroid_y = 1.0
+scene_centroid_z = 0.0
+
+scene_centroid_py = np.array([scene_centroid_x,
+                              scene_centroid_y,
+                              scene_centroid_z]).reshape([1, 3])
+scene_centroid = torch.from_numpy(scene_centroid_py).float()
+
+XMIN, XMAX = -50, 50
+ZMIN, ZMAX = -50, 50
+YMIN, YMAX = -5, 5
+bounds = (XMIN, XMAX, YMIN, YMAX, ZMIN, ZMAX)
+
+Z, Y, X = 200, 8, 200
 EPS = 1e-4
 
 from functools import partial
@@ -20,26 +35,53 @@ def set_bn_momentum(model, momentum=0.1):
     for m in model.modules():
         if isinstance(m, (nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d)):
             m.momentum = momentum
+                  
+class PrintLayer(nn.Module):
+    
+    ISTORCH = True
+    
+    def __init__(self):
+        super(PrintLayer, self).__init__()
+    
+    def forward(self, x):
+        # Do your print / debug stuff here
+        if PrintLayer.ISTORCH:
+            print('Saving Torch Tensor')
+            print(x.shape)
+            torch.save(x, 't1.pt')
+        else:
+            print('Saving ONNX Tensor')
+            print(x.shape)
+            torch.save(x, 't2.pt')
+        return x
 
 class UpsamplingConcat(nn.Module):
     def __init__(self, in_channels, out_channels, scale_factor=2):
         super().__init__()
 
         self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bilinear', align_corners=False)
+        self.ISTORCH = True
 
+         # Issue arrising here
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.InstanceNorm2d(out_channels),
+            #The outputs are same if instancenorm2d track_running_stats is set to False else different 
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.InstanceNorm2d(out_channels),
             nn.ReLU(inplace=True),
+            # PrintLayer(),
         )
-
+       
+        
     def forward(self, x_to_upsample, x):
         x_to_upsample = self.upsample(x_to_upsample)
+        #Outputs are same
         x_to_upsample = torch.cat([x, x_to_upsample], dim=1)
-        return self.conv(x_to_upsample)
+        result= self.conv(x_to_upsample)
+        #Outputs are different
+        return result
 
 class UpsamplingAdd(nn.Module):
     def __init__(self, in_channels, out_channels, scale_factor=2):
@@ -138,9 +180,6 @@ class Decoder(nn.Module):
             x[bev_flip2_index] = torch.flip(x[bev_flip2_index], [-2]) # note [-2] instead of [-3], since Y is gone now
             x[bev_flip1_index] = torch.flip(x[bev_flip1_index], [-1])
             
-            # #shabari
-            # x[bev_flip2_index] = x[bev_flip2_index][:, ::-1] # note [-2] instead of [-3], since Y is gone now
-            # x[bev_flip1_index] = x[bev_flip1_index][:, ::-1] # Flip along the last dimension
 
         feat_output = self.feat_head(x)
         segmentation_output = self.segmentation_head(x)
@@ -170,127 +209,19 @@ class Encoder_res101(nn.Module):
 
         self.depth_layer = nn.Conv2d(512, self.C, kernel_size=1, padding=0)
         self.upsampling_layer = UpsamplingConcat(1536, 512)
+        self.ISTORCH = True
 
     def forward(self, x):
         x1 = self.backbone(x)
+        #Outputs are same
         x2 = self.layer3(x1)
+        #Outputs are same
         x = self.upsampling_layer(x2, x1)
+        #Outputs are different
         x = self.depth_layer(x)
-
+        #Outputs  are  different
         return x
 
-class Encoder_res50(nn.Module):
-    def __init__(self, C):
-        super().__init__()
-        self.C = C
-        resnet = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.DEFAULT)
-        self.backbone = nn.Sequential(*list(resnet.children())[:-4])
-        self.layer3 = resnet.layer3
-
-        self.depth_layer = nn.Conv2d(512, self.C, kernel_size=1, padding=0)
-        self.upsampling_layer = UpsamplingConcat(1536, 512)
-
-    def forward(self, x):
-        x1 = self.backbone(x)
-        x2 = self.layer3(x1)
-        x = self.upsampling_layer(x2, x1)
-        x = self.depth_layer(x)
-
-        return x
-"""
- class Encoder_eff(nn.Module):
-    def __init__(self, C, version='b4'):
-        super().__init__()
-        self.C = C
-        self.downsample = 8
-        self.version = version
-
-        if self.version == 'b0':
-            self.backbone = EfficientNet.from_pretrained('efficientnet-b0')
-        elif self.version == 'b4':
-            self.backbone = EfficientNet.from_pretrained('efficientnet-b4')
-        self.delete_unused_layers()
-
-        if self.downsample == 16:
-            if self.version == 'b0':
-                upsampling_in_channels = 320 + 112
-            elif self.version == 'b4':
-                upsampling_in_channels = 448 + 160
-            upsampling_out_channels = 512
-        elif self.downsample == 8:
-            if self.version == 'b0':
-                upsampling_in_channels = 112 + 40
-            elif self.version == 'b4':
-                upsampling_in_channels = 160 + 56
-            upsampling_out_channels = 128
-        else:
-            raise ValueError(f'Downsample factor {self.downsample} not handled.')
-
-        self.upsampling_layer = UpsamplingConcat(upsampling_in_channels, upsampling_out_channels)
-        self.depth_layer = nn.Conv2d(upsampling_out_channels, self.C, kernel_size=1, padding=0)
-
-    def delete_unused_layers(self):
-        indices_to_delete = []
-        for idx in range(len(self.backbone._blocks)):
-            if self.downsample == 8:
-                if self.version == 'b0' and idx > 10:
-                    indices_to_delete.append(idx)
-                if self.version == 'b4' and idx > 21:
-                    indices_to_delete.append(idx)
-
-        for idx in reversed(indices_to_delete):
-            del self.backbone._blocks[idx]
-
-        del self.backbone._conv_head
-        del self.backbone._bn1
-        del self.backbone._avg_pooling
-        del self.backbone._dropout
-        del self.backbone._fc
-
-    def get_features(self, x):
-        # Adapted from https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/model.py#L231
-        endpoints = dict()
-
-        # Stem
-        x = self.backbone._swish(self.backbone._bn0(self.backbone._conv_stem(x)))
-        prev_x = x
-
-        # Blocks
-        for idx, block in enumerate(self.backbone._blocks):
-            drop_connect_rate = self.backbone._global_params.drop_connect_rate
-            if drop_connect_rate:
-                drop_connect_rate *= float(idx) / len(self.backbone._blocks)
-            x = block(x, drop_connect_rate=drop_connect_rate)
-            if prev_x.size(2) > x.size(2):
-                endpoints['reduction_{}'.format(len(endpoints) + 1)] = prev_x
-            prev_x = x
-
-            if self.downsample == 8:
-                if self.version == 'b0' and idx == 10:
-                    break
-                if self.version == 'b4' and idx == 21:
-                    break
-
-        # Head
-        endpoints['reduction_{}'.format(len(endpoints) + 1)] = x
-
-        if self.downsample == 16:
-            input_1, input_2 = endpoints['reduction_5'], endpoints['reduction_4']
-        elif self.downsample == 8:
-            input_1, input_2 = endpoints['reduction_4'], endpoints['reduction_3']
-        # print('input_1', input_1.shape)
-        # print('input_2', input_2.shape)
-        x = self.upsampling_layer(input_1, input_2)
-        # print('x', x.shape)
-        return x
-
-    def forward(self, x):
-        x = self.get_features(x)  # get feature vector
-        x = self.depth_layer(x)  # feature and depth head
-        return x
-
-
-"""
 class Segnet(nn.Module):
     def __init__(self, Z, Y, X, vox_util=None, 
                  use_radar=False,
@@ -311,6 +242,7 @@ class Segnet(nn.Module):
         self.rand_flip = rand_flip
         self.latent_dim = latent_dim
         self.encoder_type = encoder_type
+        self.ISTORCH = True
 
         self.mean = torch.as_tensor([0.485, 0.456, 0.406]).reshape(1,3,1,1).float().cuda()
         self.std = torch.as_tensor([0.229, 0.224, 0.225]).reshape(1,3,1,1).float().cuda()
@@ -319,13 +251,7 @@ class Segnet(nn.Module):
         self.feat2d_dim = feat2d_dim = latent_dim
         if encoder_type == "res101":
             self.encoder = Encoder_res101(feat2d_dim)
-        elif encoder_type == "res50":
-            self.encoder = Encoder_res50(feat2d_dim)
-        # elif encoder_type == "effb0":
-        #     self.encoder = Encoder_eff(feat2d_dim, version='b0')
-        # else:
-        #     # effb4
-        #     self.encoder = Encoder_eff(feat2d_dim, version='b4')
+
 
         # BEV compressor
         if self.use_radar:
@@ -373,6 +299,7 @@ class Segnet(nn.Module):
         # set_bn_momentum(self, 0.1)
 
         if vox_util is not None:
+            print('setting up vox util')
             self.xyz_memA = utils.basic.gridcloud3d(1, Z, Y, X, norm=False)
             self.xyz_camA = vox_util.Mem2Ref(self.xyz_memA, Z, Y, X, assert_cube=False)
         else:
@@ -404,11 +331,13 @@ class Segnet(nn.Module):
         # rgb encoder
         device = rgb_camXs_.device
         rgb_camXs_ = (rgb_camXs_ + 0.5 - self.mean.to(device)) / self.std.to(device)
+        #The outputs are same
         if self.rand_flip:
             B0, _, _, _ = rgb_camXs_.shape
             self.rgb_flip_index = np.random.choice([0,1], B0).astype(bool)
             rgb_camXs_[self.rgb_flip_index] = torch.flip(rgb_camXs_[self.rgb_flip_index], [-1])
         feat_camXs_ = self.encoder(rgb_camXs_)
+        # outputs are different when instance norm track_running_stats is set to True else same
         if self.rand_flip:
             feat_camXs_[self.rgb_flip_index] = torch.flip(feat_camXs_[self.rgb_flip_index], [-1])
         _, C, Hf, Wf = feat_camXs_.shape
@@ -473,6 +402,8 @@ class Segnet(nn.Module):
                 feat_bev = self.bev_compressor(feat_bev_)
             else:
                 feat_bev = torch.sum(feat_mem, dim=3)
+                
+        #Outputs are same
 
         # bev decoder
         out_dict = self.decoder(feat_bev, (self.bev_flip1_index, self.bev_flip2_index) if self.rand_flip else None)
@@ -482,6 +413,21 @@ class Segnet(nn.Module):
         seg_e = out_dict['segmentation']
         center_e = out_dict['instance_center']
         offset_e = out_dict['instance_offset']
-
+        
+        if PrintLayer.ISTORCH:
+            print('Saving Torch Tensor')
+            torch.save(raw_e, 'r1.pt')
+            torch.save(feat_e, 'f1.pt')
+            torch.save(seg_e, 's1.pt')
+            torch.save(center_e, 'c1.pt')
+            torch.save(offset_e, 'o1.pt')
+        else:
+            print('Saving ONNX Tensor')
+            torch.save(raw_e, 'r2.pt')
+            torch.save(feat_e, 'f2.pt')
+            torch.save(seg_e, 's2.pt')
+            torch.save(center_e, 'c2.pt')
+            torch.save(offset_e, 'o2.pt')
+            
         return raw_e, feat_e, seg_e, center_e, offset_e
 

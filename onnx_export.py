@@ -140,7 +140,7 @@ def convert_to_onnx(model, rgb_camXs, pix_T_cams,cam0_T_camXs, vox_util,rad_occ_
     model.module.eval()
     wrapper = ONNXWrapper(model.module, vox_util) 
     wrapper.eval() 
-    onnx_filename = "simple_bev_model.onnx"
+    onnx_filename = "debug.onnx"
     
     # Fix: Explicitly set all norm layers to eval mode
     wrapper.eval()
@@ -365,6 +365,8 @@ def main(
     seg_loss_fn = SimpleLoss(2.13).to(device)
     model = Segnet(Z, Y, X, vox_util, use_radar=use_radar, use_lidar=use_lidar, use_metaradar=use_metaradar, do_rgbcompress=do_rgbcompress, encoder_type=encoder_type)
     model = model.to(device)
+    print(model)
+    exit()
     model = torch.nn.DataParallel(model, device_ids=device_ids)
     parameters = list(model.parameters())
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -403,10 +405,6 @@ def main(
         read_time = time.time()-read_start_time
             
         run_model(model, seg_loss_fn, sample, device)
-        
-        # _, feat_bev_e, seg_bev_e, center_bev_e, offset_bev_e = run_model(model, seg_loss_fn, sample, device)
-        # # print(_, feat_bev_e, seg_bev_e, center_bev_e, offset_bev_e)
-
             
 
 if __name__ == '__main__':

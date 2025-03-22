@@ -384,7 +384,7 @@ def main(
 
     intersection = 0
     union = 0
-    while global_step < 2 : #max_iters:
+    while global_step < 1 : #max_iters:
         global_step += 1
 
         iter_start_time = time.time()

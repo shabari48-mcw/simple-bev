@@ -1,0 +1,28 @@
+model_name 1x5_3e-4_rgb00_20:04:28_1_0_14:46:31
+resolution:
+(224, 400)
+loading nuscenes...
+/media/ava/Data_CI/Datasets/nuscenes-mini mini
+making parser...
+indices (323, 1)
+NuscData: 323 samples. Split: train.
+                   Augmentation Conf: {'final_dim': (224, 400), 'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'], 'ncams': 6}
+indices (81, 1)
+NuscData: 81 samples. Split: val.
+                   Augmentation Conf: {'final_dim': (224, 400), 'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT'], 'ncams': 6}
+data ready
+/media/ava/Data_CI/workspace/shabari/miniconda3/envs/bevdet_shabari/lib/python3.10/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/media/ava/Data_CI/workspace/shabari/miniconda3/envs/bevdet_shabari/lib/python3.10/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=None`.
+  warnings.warn(msg)
+setting up vox util
+total_params 42048711
+reading ckpt from checkpoints/1x5_3e-4_rgb00_20:04:28
+...there is no full checkpoint here!
+-- note this function no longer appends "saved_checkpoints/" before the ckpt_dir --
+Saving Torch Tensor
+Converting model to ONNX...
+/media/ava/Data_CI/workspace/shabari/miniconda3/envs/bevdet_shabari/lib/python3.10/site-packages/torch/onnx/symbolic_helper.py:1531: UserWarning: ONNX export mode is set to TrainingMode.EVAL, but operator 'instance_norm' is set to train=True. Exporting with train=True.
+  warnings.warn(
+Saving ONNX Tensor
+Model successfully converted to ONNX and saved as debug.onnx

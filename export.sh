@@ -16,6 +16,7 @@ python onnx_export.py \
        --init_dir="checkpoints/${MODEL_NAME}" \
        --res_scale=1 \
        --device_ids=[0]
+       
 
 # python export_fix.py \
 #        --batch_size=1 \
