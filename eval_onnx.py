@@ -25,8 +25,7 @@ from rich.console import Console
 
 
 #ONNX
-onnx_model = onnx.load("debug.onnx")
-ort_session = ort.InferenceSession(onnx_model.SerializeToString())
+
 total_metrics ={"mse0" :0, "mse_feat":0, "mse_seg":0, "mse_center":0, "mse_offset":0}
 
 
@@ -233,6 +232,8 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
             rad_occ_mem0=in_occ_mem0)
     
    # ONNx Inference
+
+    ort_session = ort.InferenceSession("simple_bev_model.onnx")
     
     input_tensors = [rgb_camXs.cpu().numpy(), pix_T_cams.cpu().numpy(), cam0_T_camXs.cpu().numpy()]
     inputs =dict(zip([x.name for x in ort_session.get_inputs()], input_tensors))
@@ -390,7 +391,7 @@ def main(
     )
     val_iterloader = iter(val_dataloader)
 
-    max_iters =  2 #len(val_dataloader) 
+    max_iters =  len(val_dataloader) 
 
     print(f"batch_size {B}")
     # set up model & seg loss

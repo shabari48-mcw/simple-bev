@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 import saverloader
 from fire import Fire
-from nets.segnet import Segnet
+from nets.segnetonnx import Segnet
 import utils.misc
 import utils.improc
 import utils.vox
@@ -18,6 +18,7 @@ from tensorboardX import SummaryWriter
 import torch.nn.functional as F
 from rich import print
 import torch.onnx
+
 
 random.seed(125)
 np.random.seed(125)
@@ -107,68 +108,8 @@ def balanced_occ_loss(pred, occ, free):
     balanced_loss = pos_loss + neg_loss
 
     return balanced_loss
-
-
-def convert_to_onnx(model, rgb_camXs, pix_T_cams,cam0_T_camXs, vox_util,rad_occ_mem0, device):
-
-    class ONNXWrapper(torch.nn.Module):
-        def __init__(self, model, vox_util):
-            super(ONNXWrapper, self).__init__()
-            self.model = model
-            self.vox_util = vox_util
-
-        def forward(self, rgb_camXs, pix_T_cams, cam0_T_camXs, rad_occ_mem0):
-           
-            outputs = self.model(
-                rgb_camXs=rgb_camXs,
-                pix_T_cams=pix_T_cams,
-                cam0_T_camXs=cam0_T_camXs,
-                rad_occ_mem0=rad_occ_mem0,  
-                vox_util=self.vox_util   
-            )
-            return outputs
-
-
-    dummy_rgb_camXs = torch.randn(1, 6, 3, 224, 400).to(device)
-    dummy_pix_T_cams = torch.randn(1, 6, 4, 4).to(device)
-    dummy_cam0_T_camXs = torch.randn(1, 6, 4, 4).to(device)
-    dummy_rad_occ_mem0 = torch.randn(1, 1, 200, 8, 200).to(device)
-    
-    inputs=(dummy_rgb_camXs, dummy_pix_T_cams, dummy_cam0_T_camXs, dummy_rad_occ_mem0)
-
-    model.eval()
-    model.module.eval()
-    wrapper = ONNXWrapper(model.module, vox_util) 
-    wrapper.eval() 
-    onnx_filename = "debug.onnx"
-    
-    # Fix: Explicitly set all norm layers to eval mode
-    wrapper.eval()
-    for module in wrapper.modules():
-        if isinstance(module, nn.InstanceNorm2d):
-            module.track_running_stats = True
-            module.running_mean = torch.zeros(module.num_features).to(device)
-            module.running_var = torch.ones(module.num_features).to(device)
-
-    
-    with torch.no_grad():
-        torch.onnx.export(
-            wrapper.eval(),
-            (dummy_rgb_camXs, dummy_pix_T_cams, dummy_cam0_T_camXs, dummy_rad_occ_mem0),
-            onnx_filename,
-            opset_version=20,              
-            input_names=['rgb_camXs', 'pix_T_cams', 'cam0_T_camXs', 'rad_occ_mem0'],
-            output_names=['output_0', 'feat_bev_e', 'seg_bev_e', 'center_bev_e', 'offset_bev_e'],  
-            verbose=False,
-            do_constant_folding=True
-        )
-
-        print("Model successfully converted to ONNX and saved as", onnx_filename)
-
     
 def run_model(model, loss_fn, d, device='cuda:0', sw=None):
-    metrics = {}
-    total_loss = torch.tensor(0.0, requires_grad=True).to(device)
 
     imgs, rots, trans, intrins, pts0, extra0, pts, extra, lrtlist_velo, vislist, tidlist, scorelist, seg_bev_g, valid_bev_g, center_bev_g, offset_bev_g, radar_data, egopose = d
 
@@ -240,18 +181,12 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
     rad_xyz_cam0 = utils.geom.apply_4x4(cams_T_velo[:,0], xyz_rad)
 
     lrtlist_cam0 = utils.geom.apply_4x4_to_lrtlist(cams_T_velo[:,0], lrtlist_velo)
-
-    vox_util = utils.vox.Vox_util(
-        Z, Y, X,
-        scene_centroid=scene_centroid.to(device),
-        bounds=bounds,
-        assert_cube=False)
     
     V = xyz_velo0.shape[1]
 
-    occ_mem0 = vox_util.voxelize_xyz(xyz_cam0, Z, Y, X, assert_cube=False)
-    rad_occ_mem0 = vox_util.voxelize_xyz(rad_xyz_cam0, Z, Y, X, assert_cube=False)
-    metarad_occ_mem0 = vox_util.voxelize_xyz_and_feats(rad_xyz_cam0, meta_rad, Z, Y, X, assert_cube=False)
+    # occ_mem0 = vox_util.voxelize_xyz(xyz_cam0, Z, Y, X, assert_cube=False)
+    # rad_occ_mem0 = vox_util.voxelize_xyz(rad_xyz_cam0, Z, Y, X, assert_cube=False)
+    # metarad_occ_mem0 = vox_util.voxelize_xyz_and_feats(rad_xyz_cam0, meta_rad, Z, Y, X, assert_cube=False)
 
     if not (model.module.use_radar or model.module.use_lidar):
         in_occ_mem0 = None
@@ -269,16 +204,40 @@ def run_model(model, loss_fn, d, device='cuda:0', sw=None):
     cam0_T_camXs = cam0_T_camXs
 
     lrtlist_cam0_g = lrtlist_cam0
+   
     
-    print("Input Shapes")
+    # output = model(
+    #         rgb_camXs=rgb_camXs,
+    #         pix_T_cams=pix_T_cams,
+    #         cam0_T_camXs=cam0_T_camXs,
+    #         vox_util=vox_util,
+    #         rad_occ_mem0=in_occ_mem0)
     
-    print("Shape of rgb_camXs:", rgb_camXs.shape)
-    print("Shape of pix_T_cams:", pix_T_cams.shape)
-    print("Shape of cam0_T_camXs:", cam0_T_camXs.shape)
-    print("Shape of vox_util:", vox_util)
-    print("Shape of rad_occ_mem0:", rad_occ_mem0.shape)
+    inputs=(rgb_camXs, pix_T_cams, cam0_T_camXs)
 
-    convert_to_onnx(model, rgb_camXs,pix_T_cams, cam0_T_camXs,vox_util,rad_occ_mem0, device)
+    model.eval()
+    model.module.eval()
+
+    dummy_input=(rgb_camXs,
+            pix_T_cams,
+            cam0_T_camXs,
+            # vox_util,
+            # in_occ_mem0
+            )
+    onnx_filename= "simple_bev_model.onnx"
+
+    print("Converting model to ONNX...")
+    with torch.no_grad():
+        torch.onnx.export(
+                model.module,  # Your model
+                dummy_input,  # Sample input
+                onnx_filename,  # Output file name
+                opset_version=20,  # Set an appropriate ONNX opset version
+                input_names=["rgb_camXs","pix_T_cams","cam0_T_camXs"],#,"vox_util","in_occ_mem0ss"],  # Name the input tensor
+                output_names=['output_0', 'feat_bev_e', 'seg_bev_e', 'center_bev_e', 'offset_bev_e'],  
+        )
+
+        print("Model successfully converted to ONNX and saved as", onnx_filename)
     
 def main(
         exp_name='eval',
@@ -352,21 +311,21 @@ def main(
         get_tids=True,
     )
     val_iterloader = iter(val_dataloader)
-
+    
     vox_util = utils.vox.Vox_util(
         Z, Y, X,
         scene_centroid=scene_centroid.to(device),
         bounds=bounds,
         assert_cube=False)
     
-    max_iters = len(val_dataloader) # determine iters by length of dataset
+    max_iters = 1 #len(val_dataloader)
 
     # set up model & seg loss
     seg_loss_fn = SimpleLoss(2.13).to(device)
     model = Segnet(Z, Y, X, vox_util, use_radar=use_radar, use_lidar=use_lidar, use_metaradar=use_metaradar, do_rgbcompress=do_rgbcompress, encoder_type=encoder_type)
     model = model.to(device)
-    print(model)
-    exit()
+    # print(model)
+    # exit()
     model = torch.nn.DataParallel(model, device_ids=device_ids)
     parameters = list(model.parameters())
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -378,31 +337,14 @@ def main(
     requires_grad(parameters, False)
     model.eval()
 
-    # logging pools. pool size should be larger than max_iters
-    n_pool = 10000
-    loss_pool_ev = utils.misc.SimplePool(n_pool, version='np')
-    time_pool_ev = utils.misc.SimplePool(n_pool, version='np')
-    ce_pool_ev = utils.misc.SimplePool(n_pool, version='np')
-    center_pool_ev = utils.misc.SimplePool(n_pool, version='np')
-    offset_pool_ev = utils.misc.SimplePool(n_pool, version='np')
-    iou_pool_ev = utils.misc.SimplePool(n_pool, version='np')
-    itime_pool_ev = utils.misc.SimplePool(n_pool, version='np')
-    assert(n_pool > max_iters)
-
-    intersection = 0
-    union = 0
-    while global_step < 1:
+  
+    while global_step < max_iters:
         global_step += 1
-
-        iter_start_time = time.time()
-        read_start_time = time.time()
         
         try:
             sample = next(val_iterloader)
         except StopIteration:
             break
-
-        read_time = time.time()-read_start_time
             
         run_model(model, seg_loss_fn, sample, device)
             
